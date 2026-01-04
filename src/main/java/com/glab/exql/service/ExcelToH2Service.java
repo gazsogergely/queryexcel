@@ -55,31 +55,47 @@ public class ExcelToH2Service {
             List<String> columnTypes = new ArrayList<>();
             for (int i = 0; i < columNames.size(); i++) {
                 Cell cell = firstDataRow.getCell(i, Row.MissingCellPolicy.CREATE_NULL_AS_BLANK);
-//                String cellAsString = readCellAsString(cell);
-//                columnTypes.add(H2TypeInferer.inferH2Type(cellAsString));
                 columnTypes.add(mapExcelTypeToH2Type(cell));
             }
 
             // Create table with inferred types
             jdbcTemplate.execute(buildCreateTableSql(tableName, columNames, columnTypes));
 
-//            // Build insert SQL
-//            String insertSql = buildInsertSql(tableName, columNames);
-//
-//            // Insert all rows
-//            for (int i = 1; i <= sheet.getLastRowNum(); i++) {
-//                Row row = sheet.getRow(i);
-//                if (row == null) continue;
-//
-//                Object[] values = new Object[columNames.size()];
-//                for (int c = 0; c < columNames.size(); c++) {
-//                    Cell cell = row.getCell(c, Row.MissingCellPolicy.CREATE_NULL_AS_BLANK);
-//                    values[c] = readCellValue(cell);
-//                }
-//
-//                jdbcTemplate.update(insertSql, values);
-//            }
+            // Build insert SQL
+            String insertSql = buildInsertSql(tableName, columNames);
+
+            // Insert all rows
+            for (int i = 1; i <= getLastDataRow(sheet); i++) {
+                Row row = sheet.getRow(i);
+                if (row == null) continue;
+
+                Object[] values = new Object[columNames.size()];
+                for (int c = 0; c < columNames.size(); c++) {
+                    Cell cell = row.getCell(c, Row.MissingCellPolicy.CREATE_NULL_AS_BLANK);
+                    values[c] = readCellValue(cell);
+                }
+
+                jdbcTemplate.update(insertSql, values);
+            }
         }
+    }
+
+    private int getLastDataRow(Sheet sheet) {
+
+        for (int rowNum = sheet.getLastRowNum(); rowNum >= 0; rowNum--) {
+            Row row = sheet.getRow(rowNum);
+            if (row != null && rowHasData(row)) {
+                return rowNum;
+            }
+        }
+        return -1; // no data rows
+    }
+
+    private static boolean rowHasData(Row row) {
+        if (row.getCell(1).getCellType() != CellType.BLANK) {
+            return true;
+        }
+        return false;
     }
 
     private Object readCellValue(Cell cell) {
@@ -90,15 +106,6 @@ public class ExcelToH2Service {
                     : cell.getNumericCellValue();
             case BOOLEAN -> cell.getBooleanCellValue();
             default -> null;
-        };
-    }
-
-    private String readCellAsString(Cell cell) {
-        return switch (cell.getCellType()) {
-            case STRING -> cell.getStringCellValue();
-            case NUMERIC -> Double.toString(cell.getNumericCellValue());
-            case BOOLEAN -> Boolean.toString(cell.getBooleanCellValue());
-            default -> "";
         };
     }
 
