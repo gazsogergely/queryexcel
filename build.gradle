@@ -19,14 +19,15 @@ repositories {
 }
 
 dependencies {
-    implementation(
-            'org.springframework.boot:spring-boot-h2console',
-            "org.springframework.boot:spring-boot-starter"
-
-    )
-    runtimeOnly(
-            'com.h2database:h2'
-    )
+    dependencies {
+        implementation 'org.springframework.boot:spring-boot-h2console'
+        implementation 'org.springframework.boot:spring-boot-starter-data-jdbc'
+        implementation 'org.springframework.boot:spring-boot-starter-webmvc'
+        runtimeOnly 'com.h2database:h2'
+        testImplementation 'org.springframework.boot:spring-boot-starter-data-jdbc-test'
+        testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+        testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    }
 }
 
 tasks.named('test') {
