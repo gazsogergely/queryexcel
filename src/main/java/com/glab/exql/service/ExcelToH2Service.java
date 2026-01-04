@@ -135,11 +135,13 @@ public class ExcelToH2Service {
         }
     }
 
-    private String buildCreateTableSql(String tableName, List<String> columns, List<String> types) {
+    private String buildCreateTableSql(String tableName, List<String> columNames, List<String> types) {
         String cols = "";
-        for (int i = 0; i < columns.size(); i++) {
-            cols += columns.get(i) + " " + types.get(i);
-            if (i < columns.size() - 1) cols += ",";
+        for (int i = 0; i < columNames.size(); i++) {
+            String col = columNames.get(i);
+            cols += col + " " + types.get(i);
+            if ("id".equalsIgnoreCase(col)) cols += " PRIMARY KEY";
+            if (i < columNames.size() - 1) cols += ",";
         }
         return "CREATE TABLE IF NOT EXISTS " + tableName + " (" + cols + ")";
     }
