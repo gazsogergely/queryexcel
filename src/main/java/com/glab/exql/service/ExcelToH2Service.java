@@ -7,6 +7,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
 import java.io.InputStream;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -14,12 +15,21 @@ import java.util.stream.Collectors;
 @Service
 public class ExcelToH2Service {
 
+    private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy.MM.dd");
+
     private final JdbcTemplate jdbcTemplate;
 
     public ExcelToH2Service(JdbcTemplate jdbcTemplate) {
         this.jdbcTemplate = jdbcTemplate;
     }
 
+    /**
+     * Load Excel sheet into H2 table dynamically with type inference.
+     *
+     * @param fileName  Excel file in classpath (e.g., "data.xlsx")
+     * @param sheetName Sheet name
+     * @param tableName H2 table name
+     */
     public void loadExcelSheet(String fileName, String sheetName, String tableName) throws Exception {
         try (InputStream is = new ClassPathResource(fileName).getInputStream();
              Workbook workbook = new XSSFWorkbook(is)) {
@@ -30,29 +40,49 @@ public class ExcelToH2Service {
             Row header = sheet.getRow(0);
             if (header == null) throw new IllegalStateException("Header row missing in Excel");
 
-            List<String> columns = new ArrayList<>();
+            // Column names normalized
+            List<String> columNames = new ArrayList<>();
             for (Cell cell : header) {
-                columns.add(normalize(cell.getStringCellValue()));
+                columNames.add(normalize(cell.getStringCellValue()));
             }
 
-            jdbcTemplate.execute(buildCreateTableSql(tableName, columns));
-            String insertSql = buildInsertSql(tableName, columns);
-
-            for (int i = 1; i <= sheet.getLastRowNum(); i++) {
-                Row row = sheet.getRow(i);
-                if (row == null) continue;
-
-                Object[] values = new Object[columns.size()];
-                for (int c = 0; c < columns.size(); c++) {
-                    Cell cell = row.getCell(c, Row.MissingCellPolicy.CREATE_NULL_AS_BLANK);
-                    values[c] = readCell(cell);
-                }
-                jdbcTemplate.update(insertSql, values);
+            // Type inference from first non-header row
+            Row firstDataRow = sheet.getRow(1);
+            if (firstDataRow == null) {
+                throw new IllegalStateException("Excel sheet has no data rows");
             }
+
+            List<String> columnTypes = new ArrayList<>();
+            for (int i = 0; i < columNames.size(); i++) {
+                Cell cell = firstDataRow.getCell(i, Row.MissingCellPolicy.CREATE_NULL_AS_BLANK);
+//                String cellAsString = readCellAsString(cell);
+//                columnTypes.add(H2TypeInferer.inferH2Type(cellAsString));
+                columnTypes.add(mapExcelTypeToH2Type(cell));
+            }
+
+            // Create table with inferred types
+            jdbcTemplate.execute(buildCreateTableSql(tableName, columNames, columnTypes));
+
+//            // Build insert SQL
+//            String insertSql = buildInsertSql(tableName, columNames);
+//
+//            // Insert all rows
+//            for (int i = 1; i <= sheet.getLastRowNum(); i++) {
+//                Row row = sheet.getRow(i);
+//                if (row == null) continue;
+//
+//                Object[] values = new Object[columNames.size()];
+//                for (int c = 0; c < columNames.size(); c++) {
+//                    Cell cell = row.getCell(c, Row.MissingCellPolicy.CREATE_NULL_AS_BLANK);
+//                    values[c] = readCellValue(cell);
+//                }
+//
+//                jdbcTemplate.update(insertSql, values);
+//            }
         }
     }
 
-    private Object readCell(Cell cell) {
+    private Object readCellValue(Cell cell) {
         return switch (cell.getCellType()) {
             case STRING -> cell.getStringCellValue();
             case NUMERIC -> DateUtil.isCellDateFormatted(cell)
@@ -63,19 +93,56 @@ public class ExcelToH2Service {
         };
     }
 
-    private String buildCreateTableSql(String tableName, List<String> cols) {
-        return "CREATE TABLE IF NOT EXISTS " + tableName + " (" +
-                cols.stream().map(c -> c + " VARCHAR(255)").collect(Collectors.joining(",")) +
-                ")";
+    private String readCellAsString(Cell cell) {
+        return switch (cell.getCellType()) {
+            case STRING -> cell.getStringCellValue();
+            case NUMERIC -> Double.toString(cell.getNumericCellValue());
+            case BOOLEAN -> Boolean.toString(cell.getBooleanCellValue());
+            default -> "";
+        };
     }
 
-    private String buildInsertSql(String tableName, List<String> cols) {
-        String placeholders = cols.stream().map(c -> "?").collect(Collectors.joining(","));
-        return "INSERT INTO " + tableName + " (" + String.join(",", cols) + ") VALUES (" + placeholders + ")";
+    /**
+     * Infer SQL type from first row cell
+     */
+    private String mapExcelTypeToH2Type(Cell cell) {
+        switch (cell.getCellType()) {
+            case STRING:
+                return "VARCHAR(255)";
+            case NUMERIC:
+                if (DateUtil.isCellDateFormatted(cell)) {
+                    return "DATE";
+                } else {
+                    double val = cell.getNumericCellValue();
+                    // If the number is an integer, use INTEGER
+                    if (val % 1 == 0) {
+                        return "INTEGER";
+                    } else {
+                        return "DECIMAL(19,4)";
+                    }
+                }
+            case BOOLEAN:
+                return "BOOLEAN";
+            default:
+                return "VARCHAR(255)";
+        }
+    }
+
+    private String buildCreateTableSql(String tableName, List<String> columns, List<String> types) {
+        String cols = "";
+        for (int i = 0; i < columns.size(); i++) {
+            cols += columns.get(i) + " " + types.get(i);
+            if (i < columns.size() - 1) cols += ",";
+        }
+        return "CREATE TABLE IF NOT EXISTS " + tableName + " (" + cols + ")";
+    }
+
+    private String buildInsertSql(String tableName, List<String> columns) {
+        String placeholders = columns.stream().map(c -> "?").collect(Collectors.joining(","));
+        return "INSERT INTO " + tableName + " (" + String.join(",", columns) + ") VALUES (" + placeholders + ")";
     }
 
     private String normalize(String colName) {
         return colName.trim().toLowerCase().replaceAll("[^a-z0-9_]", "_");
     }
 }
-
